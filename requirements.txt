@@ -1,0 +1,7 @@
+gradio>=6.0.0
+pandas
+openpyxl
+scikit-learn
+numpy
+markdown
+

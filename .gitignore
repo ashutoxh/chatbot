@@ -1,0 +1,33 @@
+# Bytecode and caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual environments
+.env
+.venv/
+.env*/
+.venv*/
+
+# Tooling metadata
+.pytest_cache/
+.mypy_cache/
+coverage/
+htmlcov/
+
+# Editors and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+/temp/
+/tmp/
+
+PROJECT_RULES.md
