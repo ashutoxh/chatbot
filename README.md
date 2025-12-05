@@ -20,8 +20,8 @@ This repository hosts a retrieval augmented chatbot focused on George Soros's re
    - **TF-IDF mode (default)**: Builds a TF-IDF vectorizer (CPU only) and stores the sparse matrix in memory
    - **Transformer mode (optional)**: Generates embeddings for the corpus using Hugging Face Router API (requires API token)
 3. **Query handling**: `_retrieve_relevant_qa()` processes queries based on selected mode:
-   - **TF-IDF**: Transforms query into TF-IDF space, finds top matches via cosine similarity
-   - **Transformer**: Gets query embedding from API, computes cosine similarity against corpus embeddings
+   - **TF-IDF**: Transforms query into TF-IDF space (statistical word counting, no transformer), finds top matches via cosine similarity
+   - **Transformer**: Gets query embedding from Hugging Face API (uses neural network transformer model), computes cosine similarity against corpus embeddings
    - Both modes optionally inject exact matches based on normalized question lookup
 4. **Answer composition**: `_compose_answer()` inspects the retrieved snippets. For fact-style prompts (name, birth, death, etc.) it responds with the highest confidence snippet. For broader prompts it stitches the top answers into a narrative summary with explicit attribution.
 5. **UI update**: `app.py` displays the assistant reply in the chat feed, refreshes the context cards, and updates the insight and dataset panels.
@@ -36,10 +36,23 @@ This repository hosts a retrieval augmented chatbot focused on George Soros's re
 ## Models and Indexing Details
 
 ### TF-IDF Mode (Default)
-- **Vectorizer**: `sklearn.feature_extraction.text.TfidfVectorizer` with `(1, 2)` n-grams, 5,000 features, English stop words, and lowercase normalization.
-- **Similarity metric**: cosine similarity over the TF-IDF matrix.
-- **Device**: CPU only, ensuring parity across macOS (Intel or Apple Silicon), Linux, and Windows.
-- **Dependencies**: None beyond standard Python libraries (scikit-learn, pandas).
+
+**Important: TF-IDF does NOT use a transformer model.** It is a traditional statistical text analysis method that predates neural networks and transformers by decades.
+
+- **Method**: Term Frequency-Inverse Document Frequency (TF-IDF) - a bag-of-words approach
+- **Implementation**: `sklearn.feature_extraction.text.TfidfVectorizer` from scikit-learn
+- **How it works**:
+  1. Counts how often each word/ngram appears in documents (Term Frequency)
+  2. Weights words by how rare they are across the corpus (Inverse Document Frequency)
+  3. Creates sparse vectors representing documents as weighted word counts
+  4. Uses cosine similarity to find similar documents
+- **No neural networks**: Pure statistical computation, no machine learning model training
+- **No transformers**: Does not use transformer architecture, attention mechanisms, or embeddings
+- **Vectorizer**: `TfidfVectorizer` with `(1, 2)` n-grams, 5,000 features, English stop words, and lowercase normalization
+- **Similarity metric**: cosine similarity over the TF-IDF matrix
+- **Device**: CPU only, ensuring parity across macOS (Intel or Apple Silicon), Linux, and Windows
+- **Dependencies**: None beyond standard Python libraries (scikit-learn, pandas)
+- **Code location**: `rag_engine.py` lines 288-295 - uses `sklearn.feature_extraction.text.TfidfVectorizer`, not any transformer model
 
 ### Transformer Mode (Optional)
 - **Model**: `sentence-transformers/paraphrase-MiniLM-L6-v2` via Hugging Face Router API
