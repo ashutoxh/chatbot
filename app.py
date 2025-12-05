@@ -94,42 +94,17 @@ def _get_hero_image_data_url() -> str:
 
 def _load_readme_html() -> str:
     """Render README.md as HTML so the UI mirrors the docs."""
-    global _readme_html_cache
-    if _readme_html_cache is not None:
-        return _readme_html_cache
-    
+    # Don't cache - always reload to show latest README updates
     try:
         text = README_PATH.read_text(encoding="utf-8")
     except Exception as exc:
-        _readme_html_cache = f"<p>Unable to load README.md: {html.escape(str(exc))}</p>"
-        return _readme_html_cache
+        return f"<p>Unable to load README.md: {html.escape(str(exc))}</p>"
     
     if markdown is not None:
-        _readme_html_cache = markdown.markdown(text)
+        return markdown.markdown(text)
     else:
         escaped = html.escape(text).replace("\n", "<br/>")
-        _readme_html_cache = f"<pre>{escaped}</pre>"
-    return _readme_html_cache
-
-
-def _load_readme_html() -> str:
-    """Render README.md as HTML so the UI mirrors the docs."""
-    global _readme_html_cache
-    if _readme_html_cache is not None:
-        return _readme_html_cache
-    
-    try:
-        text = README_PATH.read_text(encoding="utf-8")
-    except Exception as exc:
-        _readme_html_cache = f"<p>Unable to load README.md: {html.escape(str(exc))}</p>"
-        return _readme_html_cache
-    
-    if markdown is not None:
-        _readme_html_cache = markdown.markdown(text)
-    else:
-        escaped = html.escape(text).replace("\n", "<br/>")
-        _readme_html_cache = f"<pre>{escaped}</pre>"
-    return _readme_html_cache
+        return f"<pre>{escaped}</pre>"
 
 
 def _trim_text(value: str, limit: int = 220) -> str:
