@@ -52,13 +52,44 @@ This repository hosts a retrieval augmented chatbot focused on George Soros's re
 ### Answering Strategy
 Both modes use deterministic snippet selection and formatting. There is no generative LLM call, so responses always originate from the curated dataset.
 
+### Why TF-IDF and Transformer Often Give the Same Answers
+
+For this specific use case (curated Q&A dataset about George Soros), TF-IDF and transformer embeddings frequently produce identical or very similar results. Here's why:
+
+1. **Small, Curated Dataset**: The knowledge base is a hand-curated Excel workbook with specific questions and answers. The vocabulary is limited and domain-specific, making keyword-based matching highly effective.
+
+2. **Fact-Based Queries**: Most questions are factual (birth date, birthplace, investment philosophy, etc.). TF-IDF with 1-2 gram n-grams effectively captures these exact and near-exact matches.
+
+3. **Deterministic Answer Composition**: The `_compose_answer()` function uses the same logic regardless of retrieval method. It selects the top-scoring result and formats it deterministically. Since both methods often retrieve the same top result, the final answer is identical.
+
+4. **Exact Match Override**: The system includes an exact-match lookup that overrides similarity scores when a normalized question matches exactly. This ensures consistent answers for known questions regardless of retrieval method.
+
+5. **Limited Paraphrasing**: The dataset doesn't contain extensive paraphrasing or conceptual variations. Questions are relatively straightforward, so semantic understanding (transformer's strength) provides less advantage here.
+
+6. **TF-IDF Effectiveness**: With 1-2 gram n-grams and 5,000 features, TF-IDF captures phrase-level patterns that work well for structured Q&A. For example, "investment philosophy" as a bigram is highly discriminative.
+
+**When Transformer Might Help**: Transformer embeddings would show more benefit with:
+- Large, diverse datasets with extensive paraphrasing
+- Conceptual queries requiring semantic understanding beyond keywords
+- User queries that don't match dataset vocabulary closely
+- Multilingual or cross-lingual scenarios
+
+**Recommendation**: For this Soros Q&A chatbot, TF-IDF (default mode) is sufficient and recommended because:
+- No external dependencies or API tokens required
+- Faster (no network calls)
+- Lower latency
+- Works offline
+- Produces equivalent results for this dataset
+
+Transformer mode is available for experimentation and comparison, but TF-IDF is the practical choice for production use with this specific dataset.
+
 ## User Interface
 
 - **Chat window**: Custom CSS recreates a ChatGPT-style bubble flow with alternating assistant and user messages, autoscroll, and glassmorphism panels.
 - **Palette and chrome**: The UI uses softer graphite (#07090d) surfaces with muted amber (#d9b36a) and fern (#5e9c7e) accents, and it hides the default Gradio header/footer (API logo, settings button, etc.) for an immersive feel.
 - **Hero banner**: A base64-embedded Soros portrait anchors the top header alongside a Team Soros attribution line for CSYE 7380 (Fall 2025, Prof. Yizhen Zhao) and the full roster: Ashutosh Singh, Durga Sreshta Kamani, Junyi Zhang, Mohit Jain, Neeha Girja, and Sujay S N.
 - **Composer**: Tall multiline textbox with dedicated send and reset buttons plus quick prompt chips for common Soros topics.
-- **Retrieval mode selector**: Checkbox labeled "Use Transformer Embeddings (Hugging Face API)" allows users to switch between TF-IDF (unchecked, default) and transformer embeddings (checked). When checked, requires Hugging Face API token to be set.
+- **Retrieval mode selector**: Checkbox labeled "Use Transformer Embeddings (Hugging Face API)" allows users to switch between TF-IDF (unchecked, default) and transformer embeddings (checked). When checked, requires Hugging Face API token to be set. Note: For this curated Q&A dataset, both modes typically produce the same results (see "Why TF-IDF and Transformer Often Give the Same Answers" section below).
 - **Context intelligence**: Retrieved Q&A cards summarize label, question, trimmed answer, and relevance score.
 - **Insight deck**: Markdown summary describing the anchor question, thematic labels, and guidance for deeper exploration.
 - **Dataset pulse and quote cards**: Provide credibility (indexed row counts, label coverage) alongside rotating Soros quotes.
@@ -79,9 +110,8 @@ Both modes use deterministic snippet selection and formatting. There is no gener
    ```
    Get your token from: https://huggingface.co/settings/tokens
    - Token is **required** only if you want to use transformer embeddings (checkbox in UI)
-   - TF-IDF mode (default) works without a token
-   - Without token: You can still use the chatbot with TF-IDF mode
-   - With token: You can switch to transformer mode via the checkbox for better semantic search
+   - TF-IDF mode (default) works without a token and is recommended for this dataset
+   - **Note**: For this curated Q&A dataset, transformer embeddings typically produce the same results as TF-IDF (see explanation below). TF-IDF is faster, requires no external dependencies, and works offline.
 
 3. Start the app:
    ```bash
