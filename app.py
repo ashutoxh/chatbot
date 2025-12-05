@@ -226,8 +226,14 @@ def _coerce_history(history: List) -> List[ChatMessage]:
     return normalized
 
 
-def _handle_chat(message: str, history: List[List[str]]):
-    """Main chat handler returning updated history + side-panels."""
+def _handle_chat(message: str, history: List[List[str]], use_transformer: bool = False):
+    """Main chat handler returning updated history + side-panels.
+    
+    Args:
+        message: User message
+        history: Chat history
+        use_transformer: If True, use transformer embeddings; if False, use TF-IDF
+    """
     history_messages = _coerce_history(history)
     message = (message or "").strip()
     if not message:
@@ -237,10 +243,33 @@ def _handle_chat(message: str, history: List[List[str]]):
     
     try:
         engine = _get_rag_engine()
-        if not engine.MODEL_READY:
-            engine._load_models()
+        print(f"[DEBUG] CHAT HANDLER - Checkbox state: use_transformer={use_transformer}")
+        print(f"[DEBUG]   Message: {message[:100]}...")
         
-        result = engine.get_answer(message, top_k=4)
+        # Load the appropriate model based on checkbox state
+        # Always check and load if needed to ensure model is ready
+        if use_transformer:
+            print(f"[DEBUG]   Transformer mode requested")
+            print(f"[DEBUG]   TRANSFORMER_MODEL_READY: {engine.TRANSFORMER_MODEL_READY}")
+            if not engine.TRANSFORMER_MODEL_READY:
+                print(f"[CHAT] Loading transformer model (checkbox checked)...")
+                try:
+                    engine._load_models(use_transformer=True)
+                    print(f"[DEBUG]   Transformer model loaded successfully")
+                except Exception as e:
+                    print(f"[ERROR] Failed to load transformer model: {type(e).__name__}: {e}")
+                    raise
+        else:
+            print(f"[DEBUG]   TF-IDF mode requested")
+            print(f"[DEBUG]   MODEL_READY: {engine.MODEL_READY}")
+            if not engine.MODEL_READY:
+                print(f"[CHAT] Loading TF-IDF model (checkbox unchecked)...")
+                engine._load_models(use_transformer=False)
+                print(f"[DEBUG]   TF-IDF model loaded successfully")
+        
+        print(f"[DEBUG]   Calling get_answer with use_transformer={use_transformer}")
+        result = engine.get_answer(message, top_k=4, use_transformer=use_transformer)
+        print(f"[DEBUG]   get_answer returned {len(result.get('retrieved', []))} results")
         answer = result.get("answer", "I couldn't generate an answer. Please try again.")
         retrieved = result.get("retrieved", [])
         
@@ -827,6 +856,31 @@ def create_interface():
         display: flex;
         flex-direction: column;
         gap: 16px;
+    }
+    
+    .transformer-checkbox {
+        margin-top: 8px;
+        margin-bottom: 8px;
+    }
+    
+    .transformer-checkbox label {
+        color: rgba(230, 233, 240, 0.85) !important;
+        font-size: 0.9rem !important;
+        cursor: pointer !important;
+    }
+    
+    .transformer-checkbox input[type="checkbox"] {
+        cursor: pointer !important;
+        accent-color: #d9b36a !important;
+        width: 18px !important;
+        height: 18px !important;
+        margin-right: 8px !important;
+    }
+    
+    .transformer-checkbox .info {
+        color: rgba(148, 163, 184, 0.7) !important;
+        font-size: 0.8rem !important;
+        margin-top: 4px !important;
     }
     
     .composer-input textarea {
@@ -1661,6 +1715,12 @@ def create_interface():
                                 show_label=False,
                                 elem_classes="composer-input",
                             )
+                            use_transformer_checkbox = gr.Checkbox(
+                                label="Use Transformer Embeddings (Hugging Face API)",
+                                value=False,
+                                info="When checked, uses Hugging Face Inference API for transformer embeddings. When unchecked, uses TF-IDF approach.",
+                                elem_classes="transformer-checkbox"
+                            )
                             with gr.Row(elem_classes="composer-actions"):
                                 clear_btn = gr.Button("Reset", elem_classes="ghost-btn")
                                 send_btn = gr.Button("Send", elem_classes="primary-btn")
@@ -1690,12 +1750,12 @@ def create_interface():
         
         send_btn.click(
             _handle_chat,
-            inputs=[user_input, chatbot],
+            inputs=[user_input, chatbot, use_transformer_checkbox],
             outputs=[chatbot, user_input, context_panel, insight_panel],
         )
         user_input.submit(
             _handle_chat,
-            inputs=[user_input, chatbot],
+            inputs=[user_input, chatbot, use_transformer_checkbox],
             outputs=[chatbot, user_input, context_panel, insight_panel],
         )
         clear_btn.click(

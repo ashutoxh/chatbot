@@ -1,16 +1,18 @@
 # rag_engine.py
 # RAG Engine for George Soros Q&A Dataset
-# Lightweight TF-IDF retrieval with deterministic answer composition
+# Supports both TF-IDF and Transformer-based retrieval (via Hugging Face API) with deterministic answer composition
 
 import os
 import textwrap
 from datetime import datetime, timedelta
-from typing import List
+from typing import List, Optional
 
 # Lightweight, cross-platform dependencies only
 _pandas = None
 _TfidfVectorizer = None
 _cosine_similarity = None
+_requests = None
+_transformer_embeddings = None
 
 # Use CPU for all platforms - most compatible
 def _get_device():
@@ -34,12 +36,32 @@ def _import_vectorizer():
         _TfidfVectorizer = TfidfVectorizer
         _cosine_similarity = cosine_similarity
 
+
+def _import_transformer_api():
+    """Import requests for API calls."""
+    global _requests
+    if '_requests' not in globals():
+        try:
+            import requests
+            globals()['_requests'] = requests
+            return True
+        except ImportError:
+            return False
+    return True
+
 # ==============================
 # PATHS & DATA LOADING (LAZY)
 # ==============================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_PATH = os.path.join(BASE_DIR, "data", "Soros_sample.xlsx")
+# Using Hugging Face Router API instead of local model
+# Correct router endpoint format: https://router.huggingface.co/hf-inference/models/{model_id}/pipeline/{task}
+# For feature extraction (embeddings), we use the feature-extraction pipeline
+TRANSFORMER_API_URL = "https://router.huggingface.co/hf-inference/models/sentence-transformers/paraphrase-MiniLM-L6-v2/pipeline/feature-extraction"
+# Optional: Set HUGGINGFACE_API_TOKEN or HF_TOKEN environment variable for authentication
+# Get token from: https://huggingface.co/settings/tokens
+HF_API_TOKEN = os.environ.get("HUGGINGFACE_API_TOKEN") or os.environ.get("HF_TOKEN")
 
 _df = None
 _corpus_texts = None
@@ -133,63 +155,179 @@ _vectorizer = None
 _corpus_matrix = None
 _models_loading = False
 
-def _load_models():
-    """Prepare TF-IDF vectorizer + matrix (our lightweight 'model')."""
+TRANSFORMER_MODEL_READY = False
+TRANSFORMER_MODEL_ERROR = None
+_transformer_loading = False
+
+def _load_models(use_transformer: bool = False):
+    """Prepare TF-IDF vectorizer + matrix (default) or Transformer embeddings via Hugging Face API."""
     global MODEL_READY, MODEL_ERROR, _vectorizer, _corpus_matrix, _models_loading
+    global TRANSFORMER_MODEL_READY, TRANSFORMER_MODEL_ERROR, _transformer_embeddings, _transformer_loading
     
-    if MODEL_READY:
-        return True
-    
-    if _models_loading:
-        return False
-    
-    _models_loading = True
-    
-    try:
-        _import_pandas()
-        _import_vectorizer()
+    if use_transformer:
+        # Load transformer model
+        if TRANSFORMER_MODEL_READY:
+            return True
         
-        df, corpus_texts = _load_data()
+        if _transformer_loading:
+            return False
         
-        print("[MODEL]  Building TF-IDF vectorizer (1-2 grams, 5k features)...")
-        vectorizer = _TfidfVectorizer(
-            ngram_range=(1, 2),
-            max_features=5000,
-            stop_words="english",
-            lowercase=True,
-        )
-        corpus_matrix = vectorizer.fit_transform(corpus_texts)
+        _transformer_loading = True
         
-        _vectorizer = vectorizer
-        _corpus_matrix = corpus_matrix
+        try:
+            if not _import_transformer_api():
+                raise ImportError("requests not installed. Install with: pip install requests")
+            
+            _import_pandas()
+            df, corpus_texts = _load_data()
+            
+            print("[MODEL]  Using Hugging Face Router API for transformer embeddings...")
+            if not HF_API_TOKEN:
+                raise RuntimeError(
+                    "Hugging Face API token required for router API.\n"
+                    "Set HUGGINGFACE_API_TOKEN or HF_TOKEN environment variable.\n"
+                    "Get token from: https://huggingface.co/settings/tokens"
+                )
+            print("[MODEL]  Using authenticated API access")
+            print("[MODEL]  Generating embeddings for corpus via API...")
+            
+            # Generate embeddings using Hugging Face API
+            import numpy as np
+            from sklearn.metrics.pairwise import cosine_similarity
+            
+            requests = globals().get('_requests')
+            if not requests:
+                import requests
+                globals()['_requests'] = requests
+            
+            # Prepare headers with authentication (token already validated above)
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {HF_API_TOKEN}"
+            }
+            
+            # Batch API calls (API has rate limits, so we'll do in batches)
+            batch_size = 10
+            all_embeddings = []
+            
+            for i in range(0, len(corpus_texts), batch_size):
+                batch = corpus_texts[i:i+batch_size]
+                batch_num = i // batch_size + 1
+                try:
+                    print(f"[DEBUG] API CALL - Corpus Embeddings Batch {batch_num}/{len(corpus_texts)//batch_size + 1}")
+                    print(f"[DEBUG]   URL: {TRANSFORMER_API_URL}")
+                    print(f"[DEBUG]   Batch size: {len(batch)} documents")
+                    print(f"[DEBUG]   Has token: {HF_API_TOKEN is not None}")
+                    
+                    response = requests.post(
+                        TRANSFORMER_API_URL,
+                        json={"inputs": batch},
+                        headers=headers,
+                        timeout=30
+                    )
+                    
+                    print(f"[DEBUG]   Response status: {response.status_code}")
+                    print(f"[DEBUG]   Response headers: {dict(response.headers)}")
+                    
+                    response.raise_for_status()
+                    batch_embeddings = response.json()
+                    
+                    print(f"[DEBUG]   Response type: {type(batch_embeddings)}")
+                    if isinstance(batch_embeddings, list):
+                        print(f"[DEBUG]   Response length: {len(batch_embeddings)}")
+                        if len(batch_embeddings) > 0:
+                            print(f"[DEBUG]   First embedding shape: {len(batch_embeddings[0]) if isinstance(batch_embeddings[0], list) else 'not a list'}")
+                    
+                    all_embeddings.extend(batch_embeddings)
+                    print(f"[MODEL]  Processed {min(i+batch_size, len(corpus_texts))}/{len(corpus_texts)} documents...")
+                except Exception as e:
+                    print(f"[ERROR] API CALL FAILED - Batch {batch_num}")
+                    print(f"[ERROR]   Exception type: {type(e).__name__}")
+                    print(f"[ERROR]   Exception message: {str(e)}")
+                    if hasattr(e, 'response') and e.response is not None:
+                        print(f"[ERROR]   Response status: {e.response.status_code}")
+                        print(f"[ERROR]   Response text: {e.response.text[:200]}")
+                    # Fallback: use zeros for failed batches
+                    embedding_dim = 384  # paraphrase-MiniLM-L6-v2 dimension
+                    all_embeddings.extend([[0.0] * embedding_dim] * len(batch))
+                    print(f"[WARN]  Using zero embeddings fallback for batch {batch_num}")
+            
+            embeddings = np.array(all_embeddings)
+            _transformer_embeddings = embeddings
+            
+            print("[OK]  Transformer embeddings ready (via API).")
+            
+            TRANSFORMER_MODEL_READY = True
+            TRANSFORMER_MODEL_ERROR = None
+            return True
+        except Exception as e:
+            TRANSFORMER_MODEL_READY = False
+            TRANSFORMER_MODEL_ERROR = str(e)
+            print(f"[ERROR]  Error loading transformer model: {TRANSFORMER_MODEL_ERROR}")
+            import traceback
+            traceback.print_exc()
+            return False
+        finally:
+            _transformer_loading = False
+    else:
+        # Load TF-IDF (default)
+        if MODEL_READY:
+            return True
         
-        print("[OK]  Vectorizer ready (cross-platform, CPU-only).")
+        if _models_loading:
+            return False
         
-        MODEL_READY = True
-        MODEL_ERROR = None
-        return True
-    except Exception as e:
-        MODEL_READY = False
-        MODEL_ERROR = str(e)
-        print(f"[ERROR]  Error building vectorizer: {MODEL_ERROR}")
-        import traceback
-        traceback.print_exc()
-        return False
-    finally:
-        _models_loading = False
+        _models_loading = True
+        
+        try:
+            _import_pandas()
+            _import_vectorizer()
+            
+            df, corpus_texts = _load_data()
+            
+            print("[MODEL]  Building TF-IDF vectorizer (1-2 grams, 5k features)...")
+            vectorizer = _TfidfVectorizer(
+                ngram_range=(1, 2),
+                max_features=5000,
+                stop_words="english",
+                lowercase=True,
+            )
+            corpus_matrix = vectorizer.fit_transform(corpus_texts)
+            
+            _vectorizer = vectorizer
+            _corpus_matrix = corpus_matrix
+            
+            print("[OK]  Vectorizer ready (cross-platform, CPU-only).")
+            
+            MODEL_READY = True
+            MODEL_ERROR = None
+            return True
+        except Exception as e:
+            MODEL_READY = False
+            MODEL_ERROR = str(e)
+            print(f"[ERROR]  Error building vectorizer: {MODEL_ERROR}")
+            import traceback
+            traceback.print_exc()
+            return False
+        finally:
+            _models_loading = False
 
 
 # ==============================
 # RETRIEVAL
 # ==============================
 
-def _retrieve_relevant_qa(query: str, top_k: int = 5):
-    """Retrieve the most relevant Q&A items using cosine similarity."""
-    if not _load_models():
-        raise RuntimeError(f"Models not ready: {MODEL_ERROR}")
+def _retrieve_relevant_qa(query: str, top_k: int = 5, use_transformer: bool = False):
+    """Retrieve the most relevant Q&A items using cosine similarity.
     
-    if _vectorizer is None or _corpus_matrix is None:
-        raise RuntimeError(f"Vectorizer not initialized: {MODEL_ERROR}")
+    Args:
+        query: User query string
+        top_k: Number of results to return
+        use_transformer: If True, use transformer embeddings; if False, use TF-IDF
+    """
+    if not _load_models(use_transformer=use_transformer):
+        error_msg = TRANSFORMER_MODEL_ERROR if use_transformer else MODEL_ERROR
+        raise RuntimeError(f"Models not ready: {error_msg}")
     
     df, corpus_texts = _load_data()
     
@@ -203,8 +341,87 @@ def _retrieve_relevant_qa(query: str, top_k: int = 5):
         if token and token not in _STOP_TERMS and not token.startswith("soros") and len(token) > 2
     }
 
-    query_vec = _vectorizer.transform([query])
-    scores = _cosine_similarity(query_vec, _corpus_matrix)[0]
+    # Use transformer embeddings or TF-IDF
+    if use_transformer:
+        print(f"[DEBUG] RETRIEVAL MODE: Using TRANSFORMER embeddings")
+        print(f"[DEBUG]   Transformer embeddings loaded: {_transformer_embeddings is not None}")
+        if _transformer_embeddings is not None:
+            print(f"[DEBUG]   Embeddings shape: {_transformer_embeddings.shape}")
+        
+        if _transformer_embeddings is None:
+            raise RuntimeError(f"Transformer embeddings not initialized: {TRANSFORMER_MODEL_ERROR}")
+        
+        from sklearn.metrics.pairwise import cosine_similarity
+        import numpy as np
+        
+        # Get query embedding from API
+        requests = globals().get('_requests')
+        if not requests:
+            import requests
+            globals()['_requests'] = requests
+        
+        # Prepare headers with authentication (required for router API)
+        if not HF_API_TOKEN:
+            raise RuntimeError(
+                "Hugging Face API token required. Set HUGGINGFACE_API_TOKEN or HF_TOKEN environment variable.\n"
+                "Get token from: https://huggingface.co/settings/tokens"
+            )
+        
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {HF_API_TOKEN}"
+        }
+        
+        try:
+            print(f"[DEBUG] API CALL - Query Embedding")
+            print(f"[DEBUG]   URL: {TRANSFORMER_API_URL}")
+            print(f"[DEBUG]   Query: {query[:100]}...")
+            print(f"[DEBUG]   Has token: {HF_API_TOKEN is not None}")
+            
+            response = requests.post(
+                TRANSFORMER_API_URL,
+                json={"inputs": [query]},
+                headers=headers,
+                timeout=10
+            )
+            
+            print(f"[DEBUG]   Response status: {response.status_code}")
+            print(f"[DEBUG]   Response headers: {dict(response.headers)}")
+            
+            response.raise_for_status()
+            query_embedding_result = response.json()
+            
+            print(f"[DEBUG]   Response type: {type(query_embedding_result)}")
+            if isinstance(query_embedding_result, list):
+                print(f"[DEBUG]   Response length: {len(query_embedding_result)}")
+            
+            # API returns list with one embedding
+            if isinstance(query_embedding_result, list) and len(query_embedding_result) > 0:
+                query_embedding = np.array([query_embedding_result[0]])
+                print(f"[DEBUG]   Query embedding shape: {query_embedding.shape}")
+            else:
+                raise ValueError(f"Unexpected API response format: {type(query_embedding_result)}")
+        except Exception as e:
+            print(f"[ERROR] API CALL FAILED - Query Embedding")
+            print(f"[ERROR]   Exception type: {type(e).__name__}")
+            print(f"[ERROR]   Exception message: {str(e)}")
+            if hasattr(e, 'response') and e.response is not None:
+                print(f"[ERROR]   Response status: {e.response.status_code}")
+                print(f"[ERROR]   Response text: {e.response.text[:500]}")
+            raise RuntimeError(f"Failed to get query embedding from API: {e}")
+        
+        scores = cosine_similarity(query_embedding, _transformer_embeddings)[0]
+        print(f"[DEBUG]   Computed similarity scores shape: {scores.shape}")
+        print(f"[DEBUG]   Top score: {scores.max():.4f}, Min score: {scores.min():.4f}")
+    else:
+        print(f"[DEBUG] RETRIEVAL MODE: Using TF-IDF")
+        if _vectorizer is None or _corpus_matrix is None:
+            raise RuntimeError(f"Vectorizer not initialized: {MODEL_ERROR}")
+        
+        query_vec = _vectorizer.transform([query])
+        scores = _cosine_similarity(query_vec, _corpus_matrix)[0]
+        print(f"[DEBUG]   TF-IDF scores computed, shape: {scores.shape}")
+        print(f"[DEBUG]   Top score: {scores.max():.4f}, Min score: {scores.min():.4f}")
 
     top_k = min(top_k, len(corpus_texts))
     ranked_idx = scores.argsort()[::-1][:top_k * 2]
@@ -424,11 +641,17 @@ def _compose_answer(query: str, retrieved_qas: List[dict]) -> str:
 # PUBLIC API
 # ==============================
 
-def get_answer(query: str, top_k: int = 5):
+def get_answer(query: str, top_k: int = 5, use_transformer: bool = False):
     """
     Main RAG function: retrieve -> prompt -> generate.
     Returns structured response with answer and retrieved context.
+    
+    Args:
+        query: User query string
+        top_k: Number of results to return
+        use_transformer: If True, use transformer embeddings; if False, use TF-IDF
     """
+    print(f"[DEBUG] get_answer called - use_transformer={use_transformer}, top_k={top_k}")
     query = (query or "").strip()
     if not query:
         return {
@@ -438,7 +661,9 @@ def get_answer(query: str, top_k: int = 5):
         }
 
     try:
-        retrieved = _retrieve_relevant_qa(query, top_k=top_k)
+        print(f"[DEBUG] Calling _retrieve_relevant_qa with use_transformer={use_transformer}")
+        retrieved = _retrieve_relevant_qa(query, top_k=top_k, use_transformer=use_transformer)
+        print(f"[DEBUG] _retrieve_relevant_qa returned {len(retrieved)} results")
 
         if not retrieved:
             answer_text = (

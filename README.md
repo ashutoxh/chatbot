@@ -2,38 +2,55 @@
 
 ## Overview
 
-This repository hosts a retrieval augmented chatbot focused on George Soros's research notes. The system loads a curated Q&A workbook, builds an in-memory TF-IDF index, and returns grounded answers with traceable source cards inside a modern Gradio interface. Everything runs on CPU only and avoids heavyweight model downloads so it works on any platform.
+This repository hosts a retrieval augmented chatbot focused on George Soros's research notes. The system loads a curated Q&A workbook and supports two retrieval modes: (1) TF-IDF-based semantic search (lightweight, CPU-only, no external dependencies) and (2) Transformer embeddings via Hugging Face Router API (requires API token, provides better semantic understanding). Both modes return grounded answers with traceable source cards inside a modern Gradio interface.
 
 ## Component Map
 
 - `data/Soros_sample.xlsx` - Primary knowledge base containing question, answer, and label columns.
-- `rag_engine.py` - Retrieval layer that lazily loads the dataset, builds a TF-IDF (1-2 gram, 5k feature) matrix, and composes grounded answers without calling a generative LLM.
+- `rag_engine.py` - Retrieval layer that lazily loads the dataset, supports both TF-IDF (1-2 gram, 5k feature) and transformer embeddings (via Hugging Face Router API), and composes grounded answers without calling a generative LLM.
 - `pairs_trading.py` - Pairs trading strategy engine implementing George Soros's pair trading methodology with cointegration testing, spread analysis, and backtesting capabilities.
 - `app.py` - Gradio UI with a chat-first layout, context cards, quick prompts, hero messaging, and pairs trading analysis interface.
 - `load_models.py` - Helper script that preloads the retrieval index in an isolated process to avoid interpreter crashes.
-- `requirements.txt` - Dependency list including Gradio, pandas, scikit-learn, yfinance, statsmodels, and matplotlib.
+- `requirements.txt` - Dependency list including Gradio, pandas, scikit-learn, yfinance, statsmodels, matplotlib, and requests (for Hugging Face API).
 
 ## Data and Retrieval Flow
 
 1. **Dataset ingestion**: `rag_engine._load_data()` reads `Soros_sample.xlsx`, validates required columns, and caches both the dataframe and a normalized question lookup map.
-2. **Index construction**: `_load_models()` initializes a TF-IDF vectorizer (CPU only) and stores the sparse matrix in memory. This acts as the semantic search model.
-3. **Query handling**: `_retrieve_relevant_qa()` transforms an incoming query into the same TF-IDF space, finds the top matches, and optionally injects an exact match based on the normalized question lookup.
+2. **Index construction**: `_load_models()` initializes either:
+   - **TF-IDF mode (default)**: Builds a TF-IDF vectorizer (CPU only) and stores the sparse matrix in memory
+   - **Transformer mode (optional)**: Generates embeddings for the corpus using Hugging Face Router API (requires API token)
+3. **Query handling**: `_retrieve_relevant_qa()` processes queries based on selected mode:
+   - **TF-IDF**: Transforms query into TF-IDF space, finds top matches via cosine similarity
+   - **Transformer**: Gets query embedding from API, computes cosine similarity against corpus embeddings
+   - Both modes optionally inject exact matches based on normalized question lookup
 4. **Answer composition**: `_compose_answer()` inspects the retrieved snippets. For fact-style prompts (name, birth, death, etc.) it responds with the highest confidence snippet. For broader prompts it stitches the top answers into a narrative summary with explicit attribution.
 5. **UI update**: `app.py` displays the assistant reply in the chat feed, refreshes the context cards, and updates the insight and dataset panels.
 
 ## Why This Is a Custom RAG Stack
 
 - **Custom corpus**: The knowledge base is a hand-curated Soros Q&A workbook under `data/Soros_sample.xlsx`, not a hosted API or generic dataset. `_load_data()` normalizes and caches every question for exact-match overrides.
-- **Custom retriever**: `_load_models()` trains our own TF-IDF (1–2 gram, 5k feature) index on that corpus at runtime, yielding a lightweight, CPU-only semantic searcher tailored to the dataset.
-- **Custom answer composer**: `_compose_answer()` decides when to return verbatim factual snippets versus stitched summaries, always citing the retrieved rows. There is no LLM call—responses are pure retrieval + deterministic formatting.
-- **Tight UI wiring**: `_handle_chat()` in `app.py` calls `rag_engine.get_answer()`, surfaces the retrieved evidence as context cards, and keeps the conversation grounded in the Soros dossier.
+- **Dual retrieval modes**: `_load_models()` supports both TF-IDF (lightweight, CPU-only, no external dependencies) and transformer embeddings (via Hugging Face Router API for better semantic understanding). Users can switch between modes via UI checkbox.
+- **Custom answer composer**: `_compose_answer()` decides when to return verbatim factual snippets versus stitched summaries, always citing the retrieved rows. There is no generative LLM call—responses are pure retrieval + deterministic formatting.
+- **Tight UI wiring**: `_handle_chat()` in `app.py` calls `rag_engine.get_answer()` with the selected retrieval mode, surfaces the retrieved evidence as context cards, and keeps the conversation grounded in the Soros dossier.
 
 ## Models and Indexing Details
 
+### TF-IDF Mode (Default)
 - **Vectorizer**: `sklearn.feature_extraction.text.TfidfVectorizer` with `(1, 2)` n-grams, 5,000 features, English stop words, and lowercase normalization.
 - **Similarity metric**: cosine similarity over the TF-IDF matrix.
 - **Device**: CPU only, ensuring parity across macOS (Intel or Apple Silicon), Linux, and Windows.
-- **Answering strategy**: deterministic snippet selection and formatting. There is no remote API call or generative decoder, so responses always originate from the curated dataset.
+- **Dependencies**: None beyond standard Python libraries (scikit-learn, pandas).
+
+### Transformer Mode (Optional)
+- **Model**: `sentence-transformers/paraphrase-MiniLM-L6-v2` via Hugging Face Router API
+- **Endpoint**: `https://router.huggingface.co/hf-inference/models/sentence-transformers/paraphrase-MiniLM-L6-v2/pipeline/feature-extraction`
+- **Similarity metric**: cosine similarity over transformer embeddings (384-dimensional vectors)
+- **Authentication**: Requires Hugging Face API token (set via `HUGGINGFACE_API_TOKEN` or `HF_TOKEN` environment variable)
+- **Advantages**: Better semantic understanding, handles paraphrasing and conceptual similarity better than TF-IDF
+- **Limitations**: Requires internet connection and API token, API rate limits apply
+
+### Answering Strategy
+Both modes use deterministic snippet selection and formatting. There is no generative LLM call, so responses always originate from the curated dataset.
 
 ## User Interface
 
@@ -41,6 +58,7 @@ This repository hosts a retrieval augmented chatbot focused on George Soros's re
 - **Palette and chrome**: The UI uses softer graphite (#07090d) surfaces with muted amber (#d9b36a) and fern (#5e9c7e) accents, and it hides the default Gradio header/footer (API logo, settings button, etc.) for an immersive feel.
 - **Hero banner**: A base64-embedded Soros portrait anchors the top header alongside a Team Soros attribution line for CSYE 7380 (Fall 2025, Prof. Yizhen Zhao) and the full roster: Ashutosh Singh, Durga Sreshta Kamani, Junyi Zhang, Mohit Jain, Neeha Girja, and Sujay S N.
 - **Composer**: Tall multiline textbox with dedicated send and reset buttons plus quick prompt chips for common Soros topics.
+- **Retrieval mode selector**: Checkbox labeled "Use Transformer Embeddings (Hugging Face API)" allows users to switch between TF-IDF (unchecked, default) and transformer embeddings (checked). When checked, requires Hugging Face API token to be set.
 - **Context intelligence**: Retrieved Q&A cards summarize label, question, trimmed answer, and relevance score.
 - **Insight deck**: Markdown summary describing the anchor question, thematic labels, and guidance for deeper exploration.
 - **Dataset pulse and quote cards**: Provide credibility (indexed row counts, label coverage) alongside rotating Soros quotes.
@@ -52,11 +70,24 @@ This repository hosts a retrieval augmented chatbot focused on George Soros's re
    ```bash
    pip install -r requirements.txt
    ```
-2. Start the app:
+
+2. (Optional) For transformer embeddings: Set Hugging Face API token:
+   ```bash
+   export HUGGINGFACE_API_TOKEN="your_token_here"
+   # OR
+   export HF_TOKEN="your_token_here"
+   ```
+   Get your token from: https://huggingface.co/settings/tokens
+   - Token is **required** only if you want to use transformer embeddings (checkbox in UI)
+   - TF-IDF mode (default) works without a token
+   - Without token: You can still use the chatbot with TF-IDF mode
+   - With token: You can switch to transformer mode via the checkbox for better semantic search
+
+3. Start the app:
    ```bash
    python app.py
    ```
-3. Visit `http://localhost:7860` (or the auto-selected port if 7860 is busy). The first question may take a few seconds while the TF-IDF matrix warms up.
+4. Visit `http://localhost:7860` (or the auto-selected port if 7860 is busy). The first question may take a few seconds while the TF-IDF matrix warms up.
 
 ## Testing
 
