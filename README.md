@@ -8,9 +8,10 @@ This repository hosts a retrieval augmented chatbot focused on George Soros's re
 
 - `data/Soros_sample.xlsx` - Primary knowledge base containing question, answer, and label columns.
 - `rag_engine.py` - Retrieval layer that lazily loads the dataset, builds a TF-IDF (1-2 gram, 5k feature) matrix, and composes grounded answers without calling a generative LLM.
-- `app.py` - Gradio UI with a chat-first layout, context cards, quick prompts, and hero messaging that mirrors modern assistants.
+- `pairs_trading.py` - Pairs trading strategy engine implementing George Soros's pair trading methodology with cointegration testing, spread analysis, and backtesting capabilities.
+- `app.py` - Gradio UI with a chat-first layout, context cards, quick prompts, hero messaging, and pairs trading analysis interface.
 - `load_models.py` - Helper script that preloads the retrieval index in an isolated process to avoid interpreter crashes.
-- `requirements.txt` - Minimal dependency list (Gradio, pandas, scikit-learn, transformers runtime stubs).
+- `requirements.txt` - Dependency list including Gradio, pandas, scikit-learn, yfinance, statsmodels, and matplotlib.
 
 ## Data and Retrieval Flow
 
@@ -43,6 +44,7 @@ This repository hosts a retrieval augmented chatbot focused on George Soros's re
 - **Context intelligence**: Retrieved Q&A cards summarize label, question, trimmed answer, and relevance score.
 - **Insight deck**: Markdown summary describing the anchor question, thematic labels, and guidance for deeper exploration.
 - **Dataset pulse and quote cards**: Provide credibility (indexed row counts, label coverage) alongside rotating Soros quotes.
+- **Pairs Trading Tester**: A collapsible analysis tool that allows users to test George Soros's pair trading strategy on any two stock tickers. Users can select a date range (up to 5 years back), optionally run cointegration tests, and view backtest results including spread dynamics, cumulative profit/loss, and trading signals. The strategy enforces a p-value requirement (< 0.05) during the trading period to ensure statistical validity.
 
 ## Running Locally
 
@@ -56,12 +58,37 @@ This repository hosts a retrieval augmented chatbot focused on George Soros's re
    ```
 3. Visit `http://localhost:7860` (or the auto-selected port if 7860 is busy). The first question may take a few seconds while the TF-IDF matrix warms up.
 
+## Testing
+
+Run unit tests for the pairs trading module:
+
+```bash
+pytest tests/test_pairs_trading.py -v
+```
+
+Tests cover date validation, spread calculation, cointegration requirements, and error handling. The tests use mocked data to avoid requiring live API calls during testing.
+
+## Pairs Trading Strategy
+
+The pairs trading tester implements a market-neutral strategy based on George Soros's pair trading methodology:
+
+1. **Stock Selection**: Users input any two stock ticker symbols (e.g., XOM and CVX).
+2. **Date Range**: Select start and end dates for backtesting, with automatic validation ensuring the range doesn't exceed 5 years from the current date.
+3. **Cointegration Testing**: The system automatically performs an Engle-Granger cointegration test on the selected period. The strategy will only proceed if the p-value is below 0.05, ensuring the pair shows sufficient statistical cointegration for mean reversion trading.
+4. **Optional Cointegration Display**: Users can optionally request to see detailed cointegration test results, but this is informational only - the p-value requirement is always enforced.
+5. **Spread Calculation**: The system uses OLS regression to calculate the spread between the two stocks and identifies mean reversion thresholds (mean ± 1.18 standard deviations).
+6. **Trading Signals**: When the spread deviates beyond thresholds, the strategy generates long/short signals to profit from expected mean reversion.
+7. **Performance Metrics**: Results include total profit/loss, number of trades, spread visualization, and cumulative PnL charts.
+
+The strategy is implemented in `pairs_trading.py` and integrated into the main UI via a collapsible section accessible via the "Click here to test George Soros' pair trading strategy" button.
+
 ## Operational Notes
 
 - Model loading happens at startup; if anything fails, `load_models.py` can rebuild the index in a subprocess without crashing the Gradio server.
 - All retrieval and formatting logic lives in `rag_engine.py`, making it straightforward to unit test without the UI.
 - The dataset can be updated by editing `data/Soros_sample.xlsx`. New rows are automatically indexed the next time `_load_models()` runs.
 - Errors surface inside the chat as textual warnings, so users see diagnostics instead of broken pages.
+- Pairs trading analysis requires valid stock tickers and date ranges. Invalid inputs or pairs that don't meet the p-value requirement will display helpful error messages.
 
 ## Project Rules
 

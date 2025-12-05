@@ -4,4 +4,9 @@ openpyxl
 scikit-learn
 numpy
 markdown
+yfinance>=0.2.0
+statsmodels>=0.14.0
+matplotlib>=3.7.0
+Pillow>=9.0.0
+pytest>=7.0.0
 
