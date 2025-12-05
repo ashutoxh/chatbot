@@ -44,7 +44,7 @@ This repository hosts a retrieval augmented chatbot focused on George Soros's re
 - **Context intelligence**: Retrieved Q&A cards summarize label, question, trimmed answer, and relevance score.
 - **Insight deck**: Markdown summary describing the anchor question, thematic labels, and guidance for deeper exploration.
 - **Dataset pulse and quote cards**: Provide credibility (indexed row counts, label coverage) alongside rotating Soros quotes.
-- **Pairs Trading Tester**: A collapsible analysis tool that allows users to test George Soros's pair trading strategy on any two stock tickers. Users can select a date range (up to 5 years back), optionally run cointegration tests, and view backtest results including spread dynamics, cumulative profit/loss, and trading signals. The strategy enforces a p-value requirement (< 0.05) during the trading period to ensure statistical validity.
+- **Pairs Trading Tester**: A collapsible analysis tool that allows users to test George Soros's pair trading strategy on any two stock tickers. Users can select a date range (up to 5 years back), optionally show cointegration test results and pair quality assessment via checkbox, and view backtest results including spread dynamics, cumulative profit/loss, and trading signals. The analysis always runs regardless of p-value, but pair quality indicators (good/weak pair) are only displayed when the optional cointegration checkbox is checked.
 
 ## Running Locally
 
@@ -74,13 +74,17 @@ The pairs trading tester implements a market-neutral strategy based on George So
 
 1. **Stock Selection**: Users input any two stock ticker symbols (e.g., XOM and CVX).
 2. **Date Range**: Select start and end dates for backtesting, with automatic validation ensuring the range doesn't exceed 5 years from the current date.
-3. **Cointegration Testing**: The system automatically performs an Engle-Granger cointegration test on the selected period. The strategy will only proceed if the p-value is below 0.05, ensuring the pair shows sufficient statistical cointegration for mean reversion trading.
-4. **Optional Cointegration Display**: Users can optionally request to see detailed cointegration test results, but this is informational only - the p-value requirement is always enforced.
+3. **Analysis Execution**: The strategy always runs the backtest regardless of cointegration statistics, allowing users to evaluate any pair.
+4. **Optional Cointegration Display**: Users can check the "Run optional cointegration test" checkbox to view:
+   - Pair quality assessment (GOOD PAIR / WEAK PAIR indicator based on p-value < 0.05)
+   - Detailed cointegration test statistics (test statistic, p-value, interpretation)
+   - Optional cointegration test results card
+   - When unchecked, only performance metrics (PnL, trades, spread metrics) and charts are shown
 5. **Spread Calculation**: The system uses OLS regression to calculate the spread between the two stocks and identifies mean reversion thresholds (mean ± 1.18 standard deviations).
 6. **Trading Signals**: When the spread deviates beyond thresholds, the strategy generates long/short signals to profit from expected mean reversion.
-7. **Performance Metrics**: Results include total profit/loss, number of trades, spread visualization, and cumulative PnL charts.
+7. **Performance Metrics**: Results include total profit/loss, number of trades, spread visualization, and cumulative PnL charts displayed in a modern card-based UI.
 
-The strategy is implemented in `pairs_trading.py` and integrated into the main UI via a collapsible section accessible via the "Click here to test George Soros' pair trading strategy" button.
+The strategy is implemented in `pairs_trading.py` and integrated into the main UI via a collapsible section accessible via the "Test George Soros' Pair Trading Strategy" button. The UI features a two-column layout with pairs trading on the left and the chatbot on the right for simultaneous use.
 
 ## Operational Notes
 
@@ -88,7 +92,7 @@ The strategy is implemented in `pairs_trading.py` and integrated into the main U
 - All retrieval and formatting logic lives in `rag_engine.py`, making it straightforward to unit test without the UI.
 - The dataset can be updated by editing `data/Soros_sample.xlsx`. New rows are automatically indexed the next time `_load_models()` runs.
 - Errors surface inside the chat as textual warnings, so users see diagnostics instead of broken pages.
-- Pairs trading analysis requires valid stock tickers and date ranges. Invalid inputs or pairs that don't meet the p-value requirement will display helpful error messages.
+- Pairs trading analysis requires valid stock tickers and date ranges. Invalid inputs will display helpful error messages. The analysis runs for any pair regardless of cointegration statistics, but pair quality indicators are only shown when the optional cointegration checkbox is checked.
 
 ## Project Rules
 
